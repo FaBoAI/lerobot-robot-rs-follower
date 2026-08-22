@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# LeRobot 0.6.x のプラグイン発見は「lerobot_robot_ で始まる配布名を
+# そのまま import する」方式。配布名 = トップレベルパッケージ名 (アンダースコア維持)。
+name = "lerobot_robot_rs_follower"
+version = "0.1.0"
+description = "RobStride RS follower (7DOF + Gripper, CAN) robot plugin for LeRobot 0.6.x"
+authors = [{ name = "FaBo, Inc.", email = "akira@fabo.io" }]
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot>=0.6.0",
+    "python-can",
+    "PyYAML",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+# 注意 (Jetson): 既存の CUDA torch/numpy スタックを守るため
+#   pip install -e . --no-deps
+# でインストールすること (python-can / PyYAML は別途 pip install)。
+
+[tool.setuptools.packages.find]
+include = ["lerobot_robot_rs_follower*"]
+
+[tool.setuptools.package-data]
+lerobot_robot_rs_follower = ["configs/*.yaml"]

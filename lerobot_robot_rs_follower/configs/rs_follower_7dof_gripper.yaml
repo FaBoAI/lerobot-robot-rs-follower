@@ -1,0 +1,189 @@
+# RSFollower 7DOF + Gripper default configuration
+# RIGHT shoulder_yaw は 0x18 です。0x08 は left_shoulder_yaw と重複します。
+
+type: rs_follower
+id: black
+channel: can0
+
+motor_names:
+  - gripper
+  - wrist_roll
+  - wrist_pitch
+  - wrist_yaw
+  - elbow_pitch
+  - shoulder_roll
+  - shoulder_pitch
+  - shoulder_yaw
+
+motor_models:
+  - RS05
+  - RS05
+  - RS05
+  - RS05
+  - RS00
+  - RS00
+  - RS06
+  - RS03
+
+left_motor_ids:
+  - 0x01
+  - 0x02
+  - 0x03
+  - 0x04
+  - 0x05
+  - 0x06
+  - 0x07
+  - 0x08
+
+right_motor_ids:
+  - 0x11
+  - 0x12
+  - 0x13
+  - 0x14
+  - 0x15
+  - 0x16
+  - 0x17
+  - 0x18
+
+# 明示 ID を使わない場合は、*_motor_ids を空にし、start_id/count で連番生成できます。
+left_start_id: 0x01
+left_motor_count: 8
+right_start_id: 0x11
+right_motor_count: 8
+
+# 必要に応じて反転したい軸を指定します。
+inverted_motor_names:
+  - right_shoulder_yaw
+  - right_shoulder_pitch
+  - right_shoulder_roll
+  - right_wrist_pitch
+  - left_gripper
+
+kp: 20.0
+kd: 1.0
+t_ff: 0.0
+default_v_set: 0.0
+tx_hz: 50.0
+teleop_min: 0.0
+teleop_max: 100.0
+
+# グリッパ 3.0 N.m トルク上限 + 実電流/過電流監視 (v0.0.17)
+# Leader の目標位置と、物体に触れるまでの閉じ速度は変更しません。
+# v0.0.16 以前で誤っていた RS05 の Type-2 トルク換算（±17 N.m）を、
+# RS05 公式仕様の ±5.5 N.m に修正しています。このため 3.0 N.m の保持指令が
+# 実際の RS05 トルク単位で監視され、早すぎる soft-limit 作動を防ぎます。
+gripper_motor_names:
+  - gripper
+
+gripper_hardware_torque_limit_enabled: true
+gripper_max_torque_nm: 3.0
+gripper_torque_limit_required: true
+gripper_torque_limit_verify: true
+
+# RS05 の limit_cur (0x7018) を 6.5 A に設定して読み戻します。
+# iqf (0x701A) を 20 Hz で監視し、異常電流はソフト抑制/ハードbackoffします。
+# 3.0 N.m の motor-side torque ceiling は常時有効です。
+gripper_hardware_current_limit_a: 6.5
+gripper_current_limit_required: true
+gripper_current_limit_verify: true
+gripper_current_monitor_hz: 20.0
+gripper_current_stale_s: 0.25
+gripper_current_log_enabled: false
+gripper_current_log_interval_s: 1.0
+gripper_current_soft_limit_a: 5.5
+gripper_current_hard_limit_a: 6.2
+gripper_current_release_a: 5.0
+gripper_current_trip_confirm_count: 2
+
+gripper_status_guard_enabled: true
+gripper_status_stale_s: 0.25
+# 通常の 3.0 N.m 飽和を誤検出しないよう hard threshold に小さな余裕を持たせます。
+# motor-side limit_torque=3.0 N.m が実際の絶対上限です。
+gripper_torque_soft_limit_nm: 2.85
+gripper_torque_hard_limit_nm: 3.15
+gripper_torque_release_nm: 2.70
+gripper_torque_trip_confirm_count: 3
+
+# 物体に触れた後だけ 2.2 N.m から 3.0 N.m へ保持力を上げます。
+# 物体に触れる前の自由閉じ速度にはレート制限を掛けません。
+gripper_contact_torque_nm: 1.00
+gripper_contact_initial_torque_nm: 2.20
+gripper_torque_ramp_nm_s: 3.00
+gripper_torque_backoff_nm_s: 2.50
+
+# Type-2 torque または iqf が古い/欠落した時は、フル 3.0 N.m へ上げません。
+gripper_require_status_for_full_torque: true
+gripper_no_status_max_torque_nm: 1.80
+
+# 過電流、stall-current、hard fault、または連続しきい値超過で
+# 0.05 rad 開き、クールダウン後に明示的な開く操作でラッチ解除します。
+gripper_overcurrent_backoff_rad: 0.05
+gripper_overcurrent_cooldown_s: 1.5
+gripper_overcurrent_latch_until_open: true
+
+gripper_overcurrent_guard_enabled: true
+gripper_guard_feedback_enabled: true
+gripper_guard_feedback_hz: 20.0
+gripper_guard_feedback_timeout_s: 0.08
+gripper_guard_feedback_stale_s: 0.5
+gripper_guard_require_feedback: true
+
+# デフォルトではグリッパの通常ゲイン/自由閉じ応答は他軸と同じです。
+gripper_soft_gains_enabled: false
+gripper_kp: null
+gripper_kd: null
+gripper_t_ff: null
+
+# 角度ストールによる接触検出（Type-2 status がない場合のフォールバックも兼ねます）。
+gripper_guard_stall_error_rad: 0.08
+gripper_guard_stall_motion_rad: 0.004
+gripper_guard_stall_confirm_count: 2
+
+# 接触後の位置誤差は、要求保持トルク / Kp から計算します。
+# Kp=20, 3.0 N.m なら 0.15 rad で、ここを絶対上限にします。
+gripper_guard_hold_position_error_rad: 0.05
+gripper_guard_backoff_rad: 0.01
+gripper_guard_pressure_scale: 3.0
+gripper_guard_max_hold_error_rad: 0.15
+gripper_guard_release_rad: 0.12
+gripper_guard_log_interval_s: 1.0
+
+# v0.0.10 互換用。自由閉じ速度を変えないため使用しません。
+gripper_guard_max_position_error_rad: 0.0
+gripper_guard_max_closing_speed_rad_s: 0.0
+gripper_guard_max_opening_speed_rad_s: 0.0
+
+# 起動直後に最初の action の初期位置へ一気に移動しないよう、
+# get_angle.py で読んだ現在角度からゆっくり補間します。
+initial_position_ramp_enabled: true
+initial_position_ramp_duration_s: 5.0
+initial_position_ramp_max_speed_rad_s: 0.5
+# null の場合は tx_hz から自動計算します。
+initial_position_ramp_interval_s: null
+initial_position_read_timeout_s: 0.5
+initial_position_read_retries: 2
+# true の場合、現在角度を読めない軸があると安全のため起動を止めます。
+initial_position_require_feedback: true
+# get_angle_script: ~/RS/get_angle.py
+
+# connect() 完了前に移動する初期位置 (teleop 単位 0-100)。
+# データセット humanoid_test060 の全30エピソード開始姿勢の平均 (2026-08-13 算出)。
+# これにより推論/teleop はアームが初期位置で静止してから開始される。
+# 従来動作 (最初の指令へ向けて5秒ランプ) に戻す場合はこのブロックを削除。
+initial_position:
+  left_gripper: 85.6
+  left_wrist_roll: 50.8
+  left_wrist_pitch: 42.0
+  left_wrist_yaw: 54.0
+  left_elbow_pitch: 2.5
+  left_shoulder_roll: 52.5
+  left_shoulder_pitch: 97.8
+  left_shoulder_yaw: 4.7
+  right_gripper: 8.9
+  right_wrist_roll: 53.0
+  right_wrist_pitch: 51.1
+  right_wrist_yaw: 49.9
+  right_elbow_pitch: 92.4
+  right_shoulder_roll: 51.2
+  right_shoulder_pitch: 90.6
+  right_shoulder_yaw: 5.0

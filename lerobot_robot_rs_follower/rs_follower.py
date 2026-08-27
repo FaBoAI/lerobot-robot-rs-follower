@@ -1031,10 +1031,44 @@ class RSFollower(Robot):
                 start = last if last is not None else self._ranges[full_name]["open"]
             starts[full_name] = float(start)
 
+        # 多回転座標系ずれの正規化 (2026-08-27 の 0x16 全周回転・断線事故の再発防止):
+        # RobStride の位置は ±4π の多回転絶対値。電源サイクル後は同じ物理姿勢が
+        # ±2π ずれて報告され得るため、目標を現在角と同じ回転周の最近傍表現に写す。
+        if self.cfg.initial_position_wrap_normalize:
+            two_pi = 2.0 * math.pi
+            for spec in self._motor_specs:
+                name = spec.full_name
+                turns = round((starts[name] - targets[name]) / two_pi)
+                if turns != 0:
+                    logger.warning(
+                        "RSFollower: %s の目標を %+d 回転分正規化しました "
+                        "(座標系ずれ検出: start=%.3f target=%.3f → %.3f rad)。"
+                        "較正と現在角の座標系が一致していません — 再キャリブレーション推奨",
+                        name, turns, starts[name], targets[name],
+                        targets[name] + turns * two_pi,
+                    )
+                    targets[name] = targets[name] + turns * two_pi
+
         max_delta = max(
             (abs(targets[spec.full_name] - starts[spec.full_name]) for spec in self._motor_specs),
             default=0.0,
         )
+
+        # 正規化後も大移動が必要なら座標系異常のサイン → 一切動かずに中止
+        max_travel = float(self.cfg.initial_position_max_travel_rad)
+        if max_travel > 0.0 and max_delta > max_travel:
+            worst = max(
+                self._motor_specs,
+                key=lambda s: abs(targets[s.full_name] - starts[s.full_name]),
+            )
+            raise RuntimeError(
+                f"RSFollower: 初期位置ランプの移動量 {max_delta:.2f} rad が上限 "
+                f"{max_travel:.2f} rad を超過 (最大: {worst.full_name} "
+                f"{starts[worst.full_name]:.3f}→{targets[worst.full_name]:.3f} rad)。"
+                "較正と現在角の座標系ずれの疑いがあるため動作を中止しました。"
+                "現在角の確認と再キャリブレーションを行ってください "
+                "(initial_position_max_travel_rad で上限変更可)"
+            )
 
         # すでに目標付近にいる場合は 5 秒のランプを省略して即書き込み
         if max_delta <= float(self.cfg.initial_position_ramp_skip_within_rad):

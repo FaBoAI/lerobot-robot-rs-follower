@@ -235,6 +235,16 @@ class RSFollowerConfig(RobotConfig):
     # 現在位置と目標の最大差がこの値 [rad] 以下ならランプを省略して即書き込み
     # (すでに初期位置にいる場合に毎回 5 秒待たないため)
     initial_position_ramp_skip_within_rad: float = 0.03
+    # ---- 多回転座標系ずれへの安全装置 (2026-08-27 の 0x16 全周回転・断線事故対策) ----
+    # RobStride の位置座標は ±4π の多回転絶対値で、電源サイクル後は同じ物理姿勢が
+    # ±2π ずれて報告され得る。較正由来の絶対目標をそのまま使うと
+    # 「同じ姿勢へ一回転して到達する」軌道になり配線を巻き込む。
+    # wrap_normalize: 目標を現在角と同じ回転周へ正規化 (最近傍表現を選ぶ)
+    initial_position_wrap_normalize: bool = True
+    # max_travel: 正規化後もランプの関節あたり移動量がこの値 [rad] を超える場合は
+    # 一切動かずに中止する (0 以下で無効)。初期位置への移動で大移動が必要になるのは
+    # 座標系異常のサイン。
+    initial_position_max_travel_rad: float = 1.6
     # disconnect (収録/推論の終了) 時に initial_position へゆっくり戻ってから
     # トルクを切る。initial_position 未設定またはランプ無効時は何もしない。
     return_to_initial_on_disconnect: bool = True

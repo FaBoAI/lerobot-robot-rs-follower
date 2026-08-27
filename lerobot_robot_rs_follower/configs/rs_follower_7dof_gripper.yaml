@@ -57,7 +57,8 @@ inverted_motor_names:
   - right_shoulder_pitch
   - right_shoulder_roll
   - right_wrist_pitch
-  - left_gripper
+#  - left_gripper  # 2026-08-27 外した: 左の物理「開」は角度小側
+  - right_gripper  # 2026-08-27 追加: 右の物理「開」は角度大側 (実機確認)
 
 kp: 20.0
 kd: 1.0

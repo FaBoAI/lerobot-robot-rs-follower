@@ -156,6 +156,13 @@ gripper_guard_max_opening_speed_rad_s: 0.0
 
 # 起動直後に最初の action の初期位置へ一気に移動しないよう、
 # get_angle.py で読んだ現在角度からゆっくり補間します。
+# shoulder_roll (0x06/0x16) のモータ側トルク上限。RS00 既定 14.0 N.m の 2/3。
+# 2026-08-27 の 0x16 全周回転・断線事故のフォローアップ (配線・機構の保護)
+joint_torque_limits_nm:
+  left_shoulder_roll: 9.3
+  right_shoulder_roll: 9.3
+joint_torque_limit_required: true
+
 initial_position_ramp_enabled: true
 initial_position_ramp_duration_s: 5.0
 initial_position_ramp_max_speed_rad_s: 0.5

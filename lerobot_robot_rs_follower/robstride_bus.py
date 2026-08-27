@@ -588,9 +588,14 @@ class RobStrideBus:
                 # Compatibility with older python-can releases.
                 self._bus = can.Bus(bustype="socketcan", channel=self.channel)
 
-            if self.monitor_feedback:
-                # If a previous process crashed while the gripper was enabled,
+            wants_limits = (
+                self.hardware_torque_limit_nm is not None
+                or self.hardware_current_limit_a is not None
+            )
+            if self.monitor_feedback or wants_limits:
+                # If a previous process crashed while the motor was enabled,
                 # stop it before changing safety limits.
+                # (monitor_feedback なしの関節でも、トルク上限指定時はここを通す)
                 self._stop(self.motor_id)
                 self._wait_for_status(timeout=0.10)
 

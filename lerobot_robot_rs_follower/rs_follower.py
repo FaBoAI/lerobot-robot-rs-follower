@@ -572,6 +572,16 @@ class RSFollower(Robot):
         torque_limit_nm: Optional[float] = None
         if is_gripper and bool(getattr(self.cfg, "gripper_hardware_torque_limit_enabled", True)):
             torque_limit_nm = float(getattr(self.cfg, "gripper_max_torque_nm", 3.0))
+        joint_limit_configured = False
+        if not is_gripper:
+            joint_limits = getattr(self.cfg, "joint_torque_limits_nm", None) or {}
+            if spec.full_name in joint_limits:
+                torque_limit_nm = float(joint_limits[spec.full_name])
+                joint_limit_configured = True
+                logger.info(
+                    "RSFollower: %s (0x%02X) のモータ側トルク上限を %.2f N.m に設定します",
+                    spec.full_name, spec.can_id, torque_limit_nm,
+                )
 
         current_limit_a: Optional[float] = None
         if is_gripper:
@@ -614,8 +624,9 @@ class RSFollower(Robot):
             ),
             hardware_torque_limit_nm=torque_limit_nm,
             hardware_torque_limit_required=(
-                is_gripper
-                and bool(getattr(self.cfg, "gripper_torque_limit_required", True))
+                (is_gripper and bool(getattr(self.cfg, "gripper_torque_limit_required", True)))
+                or (joint_limit_configured
+                    and bool(getattr(self.cfg, "joint_torque_limit_required", True)))
             ),
             hardware_torque_limit_verify=bool(
                 getattr(self.cfg, "gripper_torque_limit_verify", True)

@@ -235,6 +235,14 @@ class RSFollowerConfig(RobotConfig):
     # 現在位置と目標の最大差がこの値 [rad] 以下ならランプを省略して即書き込み
     # (すでに初期位置にいる場合に毎回 5 秒待たないため)
     initial_position_ramp_skip_within_rad: float = 0.03
+    # ---- 関節ごとのモータ側トルク上限 (limit_torque 0x700B、接続時に書込+検証) ----
+    # グリッパ以外の関節に適用。full 名 → N·m。未指定の関節はモータ既定値のまま。
+    # 例 (0x16 断線事故のフォローアップ、RS00 既定 14.0 の 2/3):
+    #   joint_torque_limits_nm: { left_shoulder_roll: 9.3, right_shoulder_roll: 9.3 }
+    joint_torque_limits_nm: Dict[str, float] = field(default_factory=dict)
+    # 書込/検証に失敗したら接続を中止する (安全目的の上限なので既定 True)
+    joint_torque_limit_required: bool = True
+
     # ---- 多回転座標系ずれへの安全装置 (2026-08-27 の 0x16 全周回転・断線事故対策) ----
     # RobStride の位置座標は ±4π の多回転絶対値で、電源サイクル後は同じ物理姿勢が
     # ±2π ずれて報告され得る。較正由来の絶対目標をそのまま使うと

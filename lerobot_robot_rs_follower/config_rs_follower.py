@@ -254,6 +254,10 @@ class RSFollowerConfig(RobotConfig):
     #  可動域の外へ巻く軌道を選び得るため 2026-08-27 に撤去)
     initial_position_range_check: bool = True
     initial_position_range_margin_rad: float = 0.5
+    # 電源サイクル起因の ±2π 座標系ずれを接続時に自動検出し、セッション中の
+    # 全指令に同オフセットを適用する (巻き戻し動作は一切発生しない)。
+    # 休止姿勢が較正レンジのマイナス側にある関節 (0 を跨ぐ可動域) で必須
+    frame_offset_adaptation: bool = True
     # max_travel: 関節あたりの移動量上限の下限値 [rad]。実際の許容値は
     # max(この値, 較正レンジのスパン + 0.5)。0 以下で無効
     initial_position_max_travel_rad: float = 1.6

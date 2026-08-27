@@ -347,6 +347,8 @@ class RSFollower(Robot):
             self.cfg.initial_position_ramp_enabled
         )
         self._initial_positions: Dict[str, float] = {}
+        # 電源サイクル起因の ±2π 座標系ずれ (較正系→報告系のオフセット、関節別)
+        self._frame_offsets: Dict[str, float] = {}
 
         self._gripper_guard_lock = threading.Lock()
         self._gripper_feedback: Dict[str, Dict[str, Optional[float]]] = {}
@@ -894,7 +896,7 @@ class RSFollower(Robot):
                 )
             return None
 
-    def _prepare_initial_position_ramp(self) -> None:
+    def _prepare_initial_position_ramp(self, detect_offsets: bool = True) -> None:
         """Read actual joint angles before enabling motors.
 
         The first target command after startup can otherwise jump directly to the
@@ -908,6 +910,12 @@ class RSFollower(Robot):
 
         self._initial_position_ramp_pending = True
         self._initial_positions = {}
+        if detect_offsets:
+            # 座標系オフセットの検出は接続時のみ (電源サイクル直後・バスが静かな状態)。
+            # 切断時はセッション中の値を再利用する — 電源が切れていない以上、
+            # セッション途中で座標系が変わることはなく、切断時はグリッパ監視が
+            # 走っていて読み取りの信頼性も低い (誤検出→全周回転の実害 2026-08-28)
+            self._frame_offsets = {}
         missing: List[str] = []
         retries = max(1, int(self.cfg.initial_position_read_retries))
         timeout = float(self.cfg.initial_position_read_timeout_s)
@@ -925,10 +933,14 @@ class RSFollower(Robot):
                 # 実機の現在角度と異なる可能性があるため、デフォルトでは使用しません。
                 self._initial_positions[spec.full_name] = self._ranges[spec.full_name]["open"]
             else:
-                self._initial_positions[spec.full_name] = float(angle)
-                self._last_targets[spec.full_name] = float(angle)
+                if detect_offsets:
+                    calib_angle = self._detect_frame_offset(spec, float(angle))
+                else:
+                    calib_angle = float(angle) - self._frame_offsets.get(spec.full_name, 0.0)
+                self._initial_positions[spec.full_name] = calib_angle
+                self._last_targets[spec.full_name] = calib_angle
                 if self._is_gripper(spec):
-                    self._update_gripper_feedback(spec.full_name, float(angle))
+                    self._update_gripper_feedback(spec.full_name, calib_angle)
 
         if missing:
             message = (
@@ -949,10 +961,44 @@ class RSFollower(Robot):
             ),
         )
 
+    def _detect_frame_offset(self, spec: MotorSpec, raw_angle: float) -> float:
+        """電源サイクル起因の ±2π 座標系ずれを検出し、較正座標系の角度を返す。
+
+        RobStride の多回転カウンタは電源断で消え、再投入時に 1 回転エンコーダから
+        [0, 2π) 相当で再初期化される。休止姿勢が較正レンジのマイナス側にある関節は
+        同じ物理姿勢が +2π で報告される (2026-08-27 に right_wrist_roll で実測)。
+        検出した場合はセッション中の全指令に同じオフセットを適用する
+        (_write_goal_positions で加算)。巻き戻しの動きは一切指令しないため、
+        万一「物理的に巻かれている」場合でも状態を悪化させない。
+        """
+        name = spec.full_name
+        if not bool(getattr(self.cfg, "frame_offset_adaptation", True)):
+            return raw_angle
+        lo, hi = sorted((self._ranges[name]["open"], self._ranges[name]["close"]))
+        margin = max(0.0, float(self.cfg.initial_position_range_margin_rad))
+        if lo - margin <= raw_angle <= hi + margin:
+            return raw_angle
+        two_pi = 2.0 * math.pi
+        for k in (1, -1, 2, -2):
+            shifted = raw_angle - k * two_pi
+            if lo - margin <= shifted <= hi + margin:
+                self._frame_offsets[name] = k * two_pi
+                logger.warning(
+                    "RSFollower: %s (0x%02X) に %+d 回転の座標系ずれを検出 "
+                    "(報告角 %.3f → 較正系 %.3f rad)。このセッションの指令に "
+                    "同オフセットを適用します (電源サイクル起因、物理姿勢は正常)",
+                    name, spec.can_id, k, raw_angle, shifted,
+                )
+                return shifted
+        # どのシフトでもレンジ外 → そのまま返し、後段のレンジ整合チェックで中止させる
+        return raw_angle
+
     def _write_goal_positions(self, targets: Dict[str, float]) -> None:
         for spec in self._motor_specs:
-            self._bus_by_motor[spec.full_name].sync_write(
-                "Goal_Position", {"qdd0": targets[spec.full_name]}
+            name = spec.full_name
+            self._bus_by_motor[name].sync_write(
+                "Goal_Position",
+                {"qdd0": targets[name] + self._frame_offsets.get(name, 0.0)},
             )
 
     def _move_to_initial_position(self) -> None:
@@ -1006,6 +1052,35 @@ class RSFollower(Robot):
                 targets[name] = float(start) if start is not None else self._ranges[name]["open"]
         return targets
 
+    def return_to_initial_position(self) -> None:
+        """エピソード間リセット用: 現在の指令位置から initial_position へゆっくり移動する。
+
+        lerobot-record のリセット区間の頭から呼ばれる (site-packages 側パッチが
+        hasattr で検出)。開始点は直近の指令値 (_last_targets) — 実測の読み直しが
+        不要で即開始でき、指令の連続性が保たれるため座標系ずれも発生しない。
+        失敗しても収録は続行する。
+        """
+        if not self._is_connected or not self.cfg.initial_position:
+            return
+        try:
+            self._initial_position_ramp_pending = True
+            self._initial_positions = {}
+            logger.info("RSFollower: エピソード間リセット — 初期位置へゆっくり戻ります")
+            self._run_initial_position_ramp(self._initial_position_targets())
+            logger.info(
+                "RSFollower: 初期位置への復帰完了 — 物品を配置し、リーダーを初期位置に構えてください"
+            )
+        except KeyboardInterrupt:
+            # 復帰ランプ中の Ctrl+C: 途中打ち切りして収録側の正常な終了処理に任せる
+            # (握りつぶすと停止意図が失われ、送出したままだと disconnect が走らず
+            #  トルクが入ったままプロセスが落ちる — ログして再送出が正解)
+            logger.warning("RSFollower: 初期位置復帰を Ctrl+C で中断 — 終了処理へ")
+            self._initial_position_ramp_pending = False
+            raise
+        except Exception:
+            logger.exception("RSFollower: エピソード間の初期位置復帰に失敗 (収録は続行)")
+            self._initial_position_ramp_pending = False
+
     def _return_to_initial_position(self) -> None:
         """disconnect 前に初期位置へゆっくり戻る (収録/推論終了後の後片付け)。
 
@@ -1018,7 +1093,7 @@ class RSFollower(Robot):
         if not self.cfg.initial_position_ramp_enabled:
             return
         try:
-            self._prepare_initial_position_ramp()
+            self._prepare_initial_position_ramp(detect_offsets=False)
             if not self._initial_position_ramp_pending:
                 logger.warning("RSFollower: 現在角度が読めないため初期位置への復帰をスキップ")
                 return

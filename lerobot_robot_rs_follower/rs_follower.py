@@ -1042,44 +1042,54 @@ class RSFollower(Robot):
                 start = last if last is not None else self._ranges[full_name]["open"]
             starts[full_name] = float(start)
 
-        # 多回転座標系ずれの正規化 (2026-08-27 の 0x16 全周回転・断線事故の再発防止):
-        # RobStride の位置は ±4π の多回転絶対値。電源サイクル後は同じ物理姿勢が
-        # ±2π ずれて報告され得るため、目標を現在角と同じ回転周の最近傍表現に写す。
-        if self.cfg.initial_position_wrap_normalize:
-            two_pi = 2.0 * math.pi
+        # 座標系整合チェック (2026-08-27 の事故2件の教訓):
+        # RobStride の位置は ±4π の多回転絶対値で、「座標系が ±2π ずれた」のか
+        # 「関節が物理的に一回転巻かれている」のかは数値だけでは区別できない
+        # (±2π の表現が同一のため)。曖昧なまま動かすのは常に危険 →
+        # 開始角が較正レンジ外 (±margin) の関節が1つでもあれば、一切動かさない。
+        # ※ 旧実装の「最近傍回転周への正規化」は、レンジ外の開始角に対して
+        #    可動域の外へ一周巻く軌道を選び得るため撤去した (0x14 の実害あり)。
+        if self.cfg.initial_position_range_check:
+            margin = max(0.0, float(self.cfg.initial_position_range_margin_rad))
+            bad: List[str] = []
             for spec in self._motor_specs:
                 name = spec.full_name
-                turns = round((starts[name] - targets[name]) / two_pi)
-                if turns != 0:
-                    logger.warning(
-                        "RSFollower: %s の目標を %+d 回転分正規化しました "
-                        "(座標系ずれ検出: start=%.3f target=%.3f → %.3f rad)。"
-                        "較正と現在角の座標系が一致していません — 再キャリブレーション推奨",
-                        name, turns, starts[name], targets[name],
-                        targets[name] + turns * two_pi,
+                lo, hi = sorted(
+                    (self._ranges[name]["open"], self._ranges[name]["close"])
+                )
+                if not (lo - margin <= starts[name] <= hi + margin):
+                    bad.append(
+                        f"{name} (現在角 {starts[name]:.3f}, レンジ [{lo:.3f}, {hi:.3f}])"
                     )
-                    targets[name] = targets[name] + turns * two_pi
+            if bad:
+                raise RuntimeError(
+                    "RSFollower: 較正レンジ外の関節があるため初期位置移動を中止しました: "
+                    + "; ".join(bad)
+                    + "。座標系オフセット (電源サイクル起因) か物理的な巻き込みの可能性があります。"
+                    "トルクを切った状態で該当関節を目視確認し、手で可動域へ戻すか"
+                    "再キャリブレーションしてください"
+                )
 
         max_delta = max(
             (abs(targets[spec.full_name] - starts[spec.full_name]) for spec in self._motor_specs),
             default=0.0,
         )
 
-        # 正規化後も大移動が必要なら座標系異常のサイン → 一切動かずに中止
-        max_travel = float(self.cfg.initial_position_max_travel_rad)
-        if max_travel > 0.0 and max_delta > max_travel:
-            worst = max(
-                self._motor_specs,
-                key=lambda s: abs(targets[s.full_name] - starts[s.full_name]),
-            )
-            raise RuntimeError(
-                f"RSFollower: 初期位置ランプの移動量 {max_delta:.2f} rad が上限 "
-                f"{max_travel:.2f} rad を超過 (最大: {worst.full_name} "
-                f"{starts[worst.full_name]:.3f}→{targets[worst.full_name]:.3f} rad)。"
-                "較正と現在角の座標系ずれの疑いがあるため動作を中止しました。"
-                "現在角の確認と再キャリブレーションを行ってください "
-                "(initial_position_max_travel_rad で上限変更可)"
-            )
+        # 移動量ガード: 関節ごとに「較正レンジのスパン + 0.5」まで許容 (レンジ内の移動は
+        # 通常テレオペと同等で安全)。それを超える移動は目標側の異常 → 動かず中止
+        base_travel = float(self.cfg.initial_position_max_travel_rad)
+        for spec in self._motor_specs:
+            name = spec.full_name
+            lo, hi = sorted((self._ranges[name]["open"], self._ranges[name]["close"]))
+            allowed = max(base_travel, (hi - lo) + 0.5) if base_travel > 0.0 else float("inf")
+            delta = abs(targets[name] - starts[name])
+            if delta > allowed:
+                raise RuntimeError(
+                    f"RSFollower: {name} の初期位置移動量 {delta:.2f} rad が許容 "
+                    f"{allowed:.2f} rad (レンジスパン+0.5) を超過 "
+                    f"({starts[name]:.3f}→{targets[name]:.3f} rad)。"
+                    "目標または較正の異常の疑いがあるため動作を中止しました"
+                )
 
         # すでに目標付近にいる場合は 5 秒のランプを省略して即書き込み
         if max_delta <= float(self.cfg.initial_position_ramp_skip_within_rad):

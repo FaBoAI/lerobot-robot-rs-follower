@@ -247,11 +247,15 @@ class RSFollowerConfig(RobotConfig):
     # RobStride の位置座標は ±4π の多回転絶対値で、電源サイクル後は同じ物理姿勢が
     # ±2π ずれて報告され得る。較正由来の絶対目標をそのまま使うと
     # 「同じ姿勢へ一回転して到達する」軌道になり配線を巻き込む。
-    # wrap_normalize: 目標を現在角と同じ回転周へ正規化 (最近傍表現を選ぶ)
-    initial_position_wrap_normalize: bool = True
-    # max_travel: 正規化後もランプの関節あたり移動量がこの値 [rad] を超える場合は
-    # 一切動かずに中止する (0 以下で無効)。初期位置への移動で大移動が必要になるのは
-    # 座標系異常のサイン。
+    # range_check: 開始角が較正レンジ ±margin の外にある関節が1つでもあれば
+    # 一切動かさずに中止する。「±2π の座標系オフセット」と「物理的な巻き込み」は
+    # 数値だけでは区別できないため、曖昧なまま動かさないのが唯一安全
+    # (旧 wrap_normalize (最近傍回転周への正規化) はレンジ外開始角に対して
+    #  可動域の外へ巻く軌道を選び得るため 2026-08-27 に撤去)
+    initial_position_range_check: bool = True
+    initial_position_range_margin_rad: float = 0.5
+    # max_travel: 関節あたりの移動量上限の下限値 [rad]。実際の許容値は
+    # max(この値, 較正レンジのスパン + 0.5)。0 以下で無効
     initial_position_max_travel_rad: float = 1.6
     # disconnect (収録/推論の終了) 時に initial_position へゆっくり戻ってから
     # トルクを切る。initial_position 未設定またはランプ無効時は何もしない。

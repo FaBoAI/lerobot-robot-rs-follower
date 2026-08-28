@@ -1801,6 +1801,32 @@ class RSFollower(Robot):
                 getattr(self.cfg, "gripper_overcurrent_latch_until_open", True)
             )
 
+            # FaBo パッチ: モータ本体の保護 (堵転/過電流) でフォルトすると
+            # フィードバックが途絶し、健全なステータスを要求する解除条件が
+            # 永遠に満たせず「手が死ぬ」。開き操作を合図に故障クリア +
+            # 再イネーブルを試みる (1秒に1回まで)。復活すれば新鮮なステータス
+            # が届き、通常の解除経路が機能する。
+            motor_faulted = (not status_ok) or (
+                status is not None and status.hard_fault
+            )
+            if opening_requested and cooled and motor_faulted:
+                last_try = float(state.get("last_reenable_time") or 0.0)
+                if now - last_try >= 1.0:
+                    state["last_reenable_time"] = now
+                    bus = self._bus_by_motor.get(spec.full_name)
+                    recover = getattr(bus, "try_fault_recovery", None)
+                    if callable(recover):
+                        try:
+                            ok = bool(recover())
+                        except Exception:
+                            ok = False
+                        self._log_gripper_guard(
+                            spec,
+                            logging.WARNING,
+                            "モータフォルト復旧を試行 (故障クリア+再イネーブル): %s",
+                            "OK" if ok else "送信失敗",
+                        )
+
             # Opening is always allowed.  Closing remains latched until the
             # cooldown/status conditions are satisfied and, by default, the
             # operator has deliberately opened the hand.

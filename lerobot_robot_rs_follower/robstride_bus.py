@@ -304,6 +304,21 @@ class RobStrideBus:
         extid = build_ext_id(MODE_STOP, self.host_id, motor_id)
         return self._send(mk_msg_ext(extid), "STOP")
 
+    def try_fault_recovery(self) -> bool:
+        """モータ内部保護 (堵転/過電流等) でフォルトした後の復旧を試みる。
+
+        RobStride 私有プロトコルでは Type4 (STOP) の data[0]=1 が故障クリア。
+        クリア → 再イネーブルの順に送る。トルク/電流上限 (RAM パラメータ) は
+        電源断されない限り保持されるため再設定は不要。
+        """
+        extid = build_ext_id(MODE_STOP, self.host_id, self.motor_id)
+        ok_clear = self._send(
+            mk_msg_ext(extid, b"\x01" + b"\x00" * 7), "STOP+FAULT_CLEAR"
+        )
+        time.sleep(0.02)
+        ok_enable = self._enable(self.motor_id)
+        return bool(ok_clear and ok_enable)
+
     def _op_control(
         self,
         motor_id: int,

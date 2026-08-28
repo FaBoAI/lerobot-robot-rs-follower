@@ -828,6 +828,10 @@ class RSFollower(Robot):
         script = getattr(self.cfg, "get_angle_script", None)
         if script:
             return Path(str(script)).expanduser()
+        # 既定はリポジトリ同梱版 (scripts/get_angle.py)。見つからない場合のみ旧来の ~/RS を見る
+        bundled = Path(__file__).resolve().parent.parent / "scripts" / "get_angle.py"
+        if bundled.is_file():
+            return bundled
         return Path.home() / "RS" / "get_angle.py"
 
     def _read_angle_once(

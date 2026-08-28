@@ -1574,10 +1574,13 @@ class RSFollower(Robot):
                     torque_s = (
                         f"{measured_torque:.3f}" if measured_torque is not None else "n/a"
                     )
+                    temp_s = (
+                        f"{float(status.temperature):.1f}" if status is not None else "n/a"
+                    )
                     with open("/home/jetson/Otter/outputs/gripper_guard.log", "a") as f:
                         f.write(
                             f"{datetime.datetime.now():%m-%d %H:%M:%S.%f} TELEM {full_name}: "
-                            f"current={measured_current:.3f}A torque={torque_s}\n"
+                            f"current={measured_current:.3f}A torque={torque_s} temp={temp_s}C\n"
                         )
                 except Exception:
                     pass

@@ -91,18 +91,18 @@ gripper_current_monitor_hz: 20.0
 gripper_current_stale_s: 0.25
 gripper_current_log_enabled: false
 gripper_current_log_interval_s: 1.0
-gripper_current_soft_limit_a: 7.0
-gripper_current_hard_limit_a: 7.5
-gripper_current_release_a: 6.0
-gripper_current_trip_confirm_count: 2
+gripper_current_soft_limit_a: 7.2
+gripper_current_hard_limit_a: 7.8
+gripper_current_release_a: 6.2
+gripper_current_trip_confirm_count: 3
 
 gripper_status_guard_enabled: true
 gripper_status_stale_s: 0.25
 # 通常の 3.0 N.m 飽和を誤検出しないよう hard threshold に小さな余裕を持たせます。
 # motor-side limit_torque=3.0 N.m が実際の絶対上限です。
-gripper_torque_soft_limit_nm: 3.8
+gripper_torque_soft_limit_nm: 4.0
 gripper_torque_hard_limit_nm: 4.3
-gripper_torque_release_nm: 3.60
+gripper_torque_release_nm: 3.70
 gripper_torque_trip_confirm_count: 3
 
 # 物体に触れた後だけ 2.2 N.m から 3.0 N.m へ保持力を上げます。
@@ -118,8 +118,8 @@ gripper_no_status_max_torque_nm: 2.40
 
 # 過電流、stall-current、hard fault、または連続しきい値超過で
 # 0.05 rad 開き、クールダウン後に明示的な開く操作でラッチ解除します。
-gripper_overcurrent_backoff_rad: 0.05
-gripper_overcurrent_cooldown_s: 1.5
+gripper_overcurrent_backoff_rad: 0.04
+gripper_overcurrent_cooldown_s: 0.8
 gripper_overcurrent_latch_until_open: false
 
 gripper_overcurrent_guard_enabled: true

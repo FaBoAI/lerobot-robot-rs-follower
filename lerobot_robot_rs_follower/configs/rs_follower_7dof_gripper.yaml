@@ -107,7 +107,7 @@ gripper_torque_trip_confirm_count: 3
 
 # 物体に触れた後だけ 2.2 N.m から 3.0 N.m へ保持力を上げます。
 # 物体に触れる前の自由閉じ速度にはレート制限を掛けません。
-gripper_contact_torque_nm: 1.00
+gripper_contact_torque_nm: 1.50  # 2026-08-29: 1.0→1.5 軽接触で即ホールドに入らないよう緩和
 gripper_contact_initial_torque_nm: 2.80
 gripper_torque_ramp_nm_s: 3.00
 gripper_torque_backoff_nm_s: 2.50
@@ -146,7 +146,7 @@ gripper_guard_hold_position_error_rad: 0.05
 gripper_guard_backoff_rad: 0.01
 gripper_guard_pressure_scale: 3.0
 gripper_guard_max_hold_error_rad: 0.15
-gripper_guard_release_rad: 0.12
+gripper_guard_release_rad: 0.05  # 2026-08-29: 0.12→0.05 少し開けばすぐ解除 (手が死ぬ感覚の対策)
 gripper_guard_log_interval_s: 1.0
 
 # v0.0.10 互換用。自由閉じ速度を変えないため使用しません。

@@ -1398,6 +1398,17 @@ class RSFollower(Robot):
         if now - last_log >= interval:
             logger.log(level, "RSFollower gripper guard %s: " + msg, spec.full_name, *args)
             state["last_log_time"] = now
+            # 事後解析用の恒久ログ (ホスト/コンテナ共有の outputs/ 配下)。
+            # 端末を閉じてもトリップ履歴を追跡できるようにする。失敗は無視。
+            try:
+                import datetime
+                with open("/home/jetson/Otter/outputs/gripper_guard.log", "a") as f:
+                    f.write(
+                        f"{datetime.datetime.now():%m-%d %H:%M:%S.%f} "
+                        f"{logging.getLevelName(level)} {spec.full_name}: {msg % args}\n"
+                    )
+            except Exception:
+                pass
 
     @staticmethod
     def _limit_along_closing_direction(

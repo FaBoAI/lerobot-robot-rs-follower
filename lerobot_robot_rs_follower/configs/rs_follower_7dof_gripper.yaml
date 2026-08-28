@@ -89,8 +89,8 @@ gripper_current_limit_required: true
 gripper_current_limit_verify: true
 gripper_current_monitor_hz: 20.0
 gripper_current_stale_s: 0.25
-gripper_current_log_enabled: false
-gripper_current_log_interval_s: 1.0
+gripper_current_log_enabled: true   # 2026-08-29: 実測調整のため有効化 (outputs/gripper_guard.log にも記録)
+gripper_current_log_interval_s: 0.5
 gripper_current_soft_limit_a: 7.2
 gripper_current_hard_limit_a: 7.8
 gripper_current_release_a: 6.2

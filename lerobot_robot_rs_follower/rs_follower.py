@@ -1568,6 +1568,19 @@ class RSFollower(Robot):
                     f"{status_age:.3f}" if status_age is not None else "n/a",
                     f"{current_age:.3f}" if current_age is not None else "n/a",
                 )
+                # 事後解析用にファイルへも記録 (gripper_guard.log と同じ場所)
+                try:
+                    import datetime
+                    torque_s = (
+                        f"{measured_torque:.3f}" if measured_torque is not None else "n/a"
+                    )
+                    with open("/home/jetson/Otter/outputs/gripper_guard.log", "a") as f:
+                        f.write(
+                            f"{datetime.datetime.now():%m-%d %H:%M:%S.%f} TELEM {full_name}: "
+                            f"current={measured_current:.3f}A torque={torque_s}\n"
+                        )
+                except Exception:
+                    pass
                 state["last_current_log_time"] = now
 
         def finish(value: float) -> float:

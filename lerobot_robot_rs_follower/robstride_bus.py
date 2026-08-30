@@ -308,8 +308,11 @@ class RobStrideBus:
         """モータ内部保護 (堵転/過電流等) でフォルトした後の復旧を試みる。
 
         RobStride 私有プロトコルでは Type4 (STOP) の data[0]=1 が故障クリア。
-        クリア → 再イネーブルの順に送る。トルク/電流上限 (RAM パラメータ) は
-        電源断されない限り保持されるため再設定は不要。
+        クリア → 再イネーブル → トルク/電流上限の再書き込みの順に送る。
+        ⚠️ limit_torque/limit_cur はフォルト内部リセットで工場既定値
+        (5.5 N.m / 11 A) に戻る (2026-08-29 実測: フォルト歴のある 0x01 が
+        既定値に戻り、無フォルトの 0x11 は設定値を保持していた)。
+        復旧のたびに必ず書き直す。
         """
         extid = build_ext_id(MODE_STOP, self.host_id, self.motor_id)
         ok_clear = self._send(
@@ -317,6 +320,10 @@ class RobStrideBus:
         )
         time.sleep(0.02)
         ok_enable = self._enable(self.motor_id)
+        if self.hardware_torque_limit_nm is not None and self.hardware_torque_limit_nm > 0.0:
+            self._write_float_parameter(PARAM_TORQUE_LIMIT, self.hardware_torque_limit_nm)
+        if self.hardware_current_limit_a is not None and self.hardware_current_limit_a > 0.0:
+            self._write_float_parameter(PARAM_CURRENT_LIMIT, self.hardware_current_limit_a)
         return bool(ok_clear and ok_enable)
 
     def _op_control(

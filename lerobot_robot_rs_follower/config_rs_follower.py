@@ -190,6 +190,31 @@ class RSFollowerConfig(RobotConfig):
     gripper_require_status_for_full_torque: bool = True
     gripper_no_status_max_torque_nm: float = 1.80
 
+    # Peak hold torque commanded after contact.  None falls back to
+    # gripper_max_torque_nm.  Keep it below the motor-side ceiling so the hold
+    # command does not sit exactly on the firmware limit.
+    gripper_hold_max_torque_nm: Optional[float] = None
+
+    # Stall-protection relief (堵転保護回避).  The RS05 firmware trips its own
+    # locked-rotor protection when stall current persists with no motion
+    # (measured 2026-08-29: 4.8-5.2 A sustained for 1.5-2.5 s -> hard fault and
+    # dead feedback).  Before that timer can fire, dip the hold torque briefly
+    # so the firmware stall timer resets, then re-ramp to peak.  Pressure
+    # therefore pulses: peak most of the cycle, a short dip to the rest torque.
+    gripper_stall_relief_enabled: bool = False
+    gripper_stall_relief_current_a: float = 4.2
+    gripper_stall_relief_torque_nm: float = 2.4
+    gripper_stall_relief_high_s: float = 0.7
+    gripper_stall_relief_rest_s: float = 0.3
+    gripper_stall_relief_rest_torque_nm: float = 1.8
+
+    # Thermal relief.  Holding at stall current heats the RS05 fast (measured
+    # ~6 C/s at 5.2 A).  While the reported temperature is above the soft
+    # limit, clamp the hold torque to the relief rest torque until it cools
+    # below the release value.  None disables the check.
+    gripper_temp_soft_limit_c: Optional[float] = 70.0
+    gripper_temp_release_c: Optional[float] = 60.0
+
     # Immediate protection response to overcurrent/hard-torque/fault status.
     gripper_overcurrent_backoff_rad: float = 0.05
     gripper_overcurrent_cooldown_s: float = 1.5

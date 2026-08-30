@@ -1470,6 +1470,9 @@ class RSFollower(Robot):
             "last_status_timestamp_seen": None,
             "last_current_timestamp_seen": None,
             "last_current_log_time": 0.0,
+            "stall_risk_since": None,
+            "relief_until": 0.0,
+            "temp_relief_active": False,
         }
 
     def _apply_gripper_overcurrent_guard(
@@ -1617,6 +1620,18 @@ class RSFollower(Robot):
         assert pos is not None
 
         max_torque = max(0.0, float(getattr(self.cfg, "gripper_max_torque_nm", 3.0)))
+
+        # MIT (運控) モードではモータ側 limit_torque/limit_cur が出力を制限しない
+        # 実測 (2026-08-29: limit 3.5N·m/6.5A 設定下で 5.27N·m/10.1A を記録)。
+        # kp 項の実効トルク上限は「閉じ方向の位置誤差クランプ」で常時保証する。
+        # 自由閉じは軽負荷 (<0.5N·m) のため追従速度への影響は小さい。
+        kp_gain, _, _ = self._gains_for_motor(spec)
+        if kp_gain > 1e-9 and max_torque > 0.0:
+            max_close_err = max_torque / kp_gain
+            target = clamp_additional_close(
+                target, pos + closing_dir * max_close_err
+            )
+
         hard_limit = max(
             0.0,
             float(getattr(self.cfg, "gripper_torque_hard_limit_nm", max_torque)),
@@ -1761,6 +1776,13 @@ class RSFollower(Robot):
                     float(getattr(self.cfg, "gripper_overcurrent_backoff_rad", 0.04)),
                 )
             trip_target = float(trip_target)
+            # ラッチ中に外力 (把持物の荷重) で指が trip_target より開き側へ
+            # バックドライブされた場合、固定 trip_target のままだと位置誤差が
+            # 育って kp 項が押し返し続ける (かさ持ち上げ時に 8-10A が 1.5 秒
+            # 持続した実測の原因)。現在位置より閉じ側へは指令しない。
+            if (trip_target - pos) * closing_dir > 0.0:
+                trip_target = pos
+                state["trip_target"] = trip_target
 
             cooldown = max(
                 0.0,
@@ -1812,7 +1834,9 @@ class RSFollower(Robot):
             motor_faulted = (not status_ok) or (
                 status is not None and status.hard_fault
             )
-            if opening_requested and cooled and motor_faulted:
+            # latch_until_open=false の構成では開き操作を待たずに復旧を試みる
+            # (推論ポリシーは明示的に「開く」とは限らないため)
+            if cooled and motor_faulted and (opening_requested or not require_open):
                 last_try = float(state.get("last_reenable_time") or 0.0)
                 if now - last_try >= 1.0:
                     state["last_reenable_time"] = now
@@ -1829,6 +1853,21 @@ class RSFollower(Robot):
                             "モータフォルト復旧を試行 (故障クリア+再イネーブル): %s",
                             "OK" if ok else "送信失敗",
                         )
+
+            # FaBo パッチ: latch_until_open=false の構成では、クールダウン後に
+            # 健全なステータス (フォルトなし・トルク/電流が release 以下) が
+            # 戻れば、開き操作を待たずにラッチを自動解除する。従来は
+            # require_open=false でも「開き指令」が一度は必要で、閉じ続ける
+            # ポリシー/リーダー相手では手が死んだままになっていた。
+            # トリップ時の backoff 位置 (trip_target) は今 tick は維持する。
+            if (not require_open) and (not opening_requested) and cooled and status_safe:
+                state.update(self._default_gripper_state())
+                self._log_gripper_guard(
+                    spec,
+                    logging.INFO,
+                    "over-current latch auto-cleared after cooldown",
+                )
+                return finish(clamp_additional_close(target, trip_target))
 
             # Opening is always allowed.  Closing remains latched until the
             # cooldown/status conditions are satisfied and, by default, the
@@ -1937,6 +1976,9 @@ class RSFollower(Robot):
             state["last_torque_update_time"] = now
 
             desired_torque = max_torque
+            hold_max = getattr(self.cfg, "gripper_hold_max_torque_nm", None)
+            if hold_max is not None and float(hold_max) > 0.0:
+                desired_torque = min(desired_torque, float(hold_max))
             current_guard_configured = bool(
                 current_soft_limit is not None or current_hard_limit is not None
             )
@@ -1954,6 +1996,89 @@ class RSFollower(Robot):
                         float(getattr(self.cfg, "gripper_no_status_max_torque_nm", 1.5)),
                     ),
                 )
+
+            # --- 堵転保護リリーフ ------------------------------------------
+            # RS05 firmware は「電流高 + 回転なし」が連続するとモータ側の
+            # 堵転保護でフォルトし、フィードバックごと死ぬ (2026-08-29 実測:
+            # 4.8-5.2 A 持続 1.5-2.5 s で発火)。発火する前に保持トルクを
+            # 短時間だけ落として firmware のストールタイマーをリセットする。
+            # ディップ中も lock_target は接触点に残るため指は開かず、
+            # 圧力だけが一瞬 rest レベルへ下がる。
+            rest_torque = max(
+                0.0,
+                float(getattr(self.cfg, "gripper_stall_relief_rest_torque_nm", 1.8)),
+            )
+            if bool(getattr(self.cfg, "gripper_stall_relief_enabled", False)):
+                relief_until = float(state.get("relief_until") or 0.0)
+                if now < relief_until:
+                    desired_torque = min(desired_torque, rest_torque)
+                else:
+                    if current_ok and measured_current is not None:
+                        at_risk = measured_current >= float(
+                            getattr(self.cfg, "gripper_stall_relief_current_a", 4.2)
+                        )
+                    elif status_ok and measured_torque is not None:
+                        at_risk = measured_torque >= float(
+                            getattr(self.cfg, "gripper_stall_relief_torque_nm", 2.4)
+                        )
+                    else:
+                        at_risk = False
+                    if at_risk:
+                        risk_since = state.get("stall_risk_since")
+                        if risk_since is None:
+                            state["stall_risk_since"] = now
+                        elif now - float(risk_since) >= max(
+                            0.1,
+                            float(getattr(self.cfg, "gripper_stall_relief_high_s", 0.7)),
+                        ):
+                            rest_s = max(
+                                0.05,
+                                float(getattr(self.cfg, "gripper_stall_relief_rest_s", 0.3)),
+                            )
+                            state["relief_until"] = now + rest_s
+                            state["stall_risk_since"] = None
+                            desired_torque = min(desired_torque, rest_torque)
+                            self._log_gripper_guard(
+                                spec,
+                                logging.INFO,
+                                "stall relief dip: current=%s A -> hold %.2f N.m for %.2f s",
+                                f"{measured_current:.2f}"
+                                if measured_current is not None
+                                else "n/a",
+                                rest_torque,
+                                rest_s,
+                            )
+                    else:
+                        state["stall_risk_since"] = None
+
+            # --- 温度リリーフ ----------------------------------------------
+            # 保持中は ~6 C/s で昇温する実測あり。firmware の過熱保護に
+            # 達する前に保持トルクを rest レベルへ落とし、冷えたら戻す。
+            temp_soft = getattr(self.cfg, "gripper_temp_soft_limit_c", None)
+            if temp_soft is not None and float(temp_soft) > 0.0 and status is not None:
+                motor_temp = float(status.temperature)
+                temp_release_cfg = getattr(self.cfg, "gripper_temp_release_c", None)
+                temp_release_c = (
+                    float(temp_release_cfg)
+                    if temp_release_cfg is not None and float(temp_release_cfg) > 0.0
+                    else float(temp_soft) - 10.0
+                )
+                temp_active = bool(state.get("temp_relief_active"))
+                if motor_temp >= float(temp_soft):
+                    temp_active = True
+                elif motor_temp <= temp_release_c:
+                    temp_active = False
+                if temp_active != bool(state.get("temp_relief_active")):
+                    self._log_gripper_guard(
+                        spec,
+                        logging.WARNING,
+                        "temperature relief %s (temp=%.1f C)",
+                        "engaged" if temp_active else "released",
+                        motor_temp,
+                    )
+                state["temp_relief_active"] = temp_active
+                if temp_active:
+                    desired_torque = min(desired_torque, rest_torque)
 
             hold_torque = max(0.0, float(state.get("hold_torque_nm") or 0.0))
             if hold_torque <= 0.0:

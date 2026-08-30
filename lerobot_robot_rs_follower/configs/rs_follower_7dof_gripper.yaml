@@ -68,49 +68,71 @@ tx_hz: 50.0
 teleop_min: 0.0
 teleop_max: 100.0
 
-# グリッパ 3.0 N.m トルク上限 + 実電流/過電流監視 (v0.0.17)
+# グリッパ保持トルク + 実電流/過電流監視 (v0.0.18)
 # Leader の目標位置と、物体に触れるまでの閉じ速度は変更しません。
-# v0.0.16 以前で誤っていた RS05 の Type-2 トルク換算（±17 N.m）を、
-# RS05 公式仕様の ±5.5 N.m に修正しています。このため 3.0 N.m の保持指令が
-# 実際の RS05 トルク単位で監視され、早すぎる soft-limit 作動を防ぎます。
+#
+# 2026-08-29 実測: RS05 firmware の堵転保護は 4.8-5.2A (≈3.2N·m) の持続
+# 1.5-2.5 秒でも発火してロックする (発火後はフィードバックごと死ぬ)。
+# → 「持続」を作らないことが本質対策。gripper_stall_relief_* で保持中に
+#   短いディップを入れて firmware のストールタイマーをリセットし、
+#   その分ピーク保持トルクを 3.8 N·m へ引き上げる (旧実効 ~3.2)。
 gripper_motor_names:
   - gripper
 
 gripper_hardware_torque_limit_enabled: true
-gripper_max_torque_nm: 3.2  # 2026-08-29: 4.0→3.2 実測でモータ堵転保護が6.9A(≈4.0N·m)持続で発火するため定常を5.4A以下に
+# 2026-08-29 夕: 4.2→3.5 巻き戻し。天井=閉じ指令瞬間の突入トルク(=瞬時電流)の上限でもあり、
+# 4.2 では突入 ~7.2A のスパイク (20Hz の iqf 監視には映らない) がファーム側の
+# 高速過電流保護を叩き「掴む前にロック」する実測パターンが出たため。
+gripper_max_torque_nm: 3.5
+gripper_hold_max_torque_nm: 3.4  # 2026-08-29 夕: 3.8→3.4 (保持ピーク。リリーフで持続ロックは防ぐ)
 gripper_torque_limit_required: true
 gripper_torque_limit_verify: true
 
-# RS05 の limit_cur (0x7018) を 6.5 A に設定して読み戻します。
+# RS05 の limit_cur (0x7018) を設定して読み戻します。
 # iqf (0x701A) を 20 Hz で監視し、異常電流はソフト抑制/ハードbackoffします。
-# 3.0 N.m の motor-side torque ceiling は常時有効です。
-gripper_hardware_current_limit_a: 8.0
+gripper_hardware_current_limit_a: 6.5  # 2026-08-29 夕: 8.0→6.5 ファーム保護より先にモータ側でクランプ
 gripper_current_limit_required: true
 gripper_current_limit_verify: true
 gripper_current_monitor_hz: 20.0
 gripper_current_stale_s: 0.25
 gripper_current_log_enabled: true   # 2026-08-29: 実測調整のため有効化 (outputs/gripper_guard.log にも記録)
 gripper_current_log_interval_s: 0.5
-gripper_current_soft_limit_a: 7.2
-gripper_current_hard_limit_a: 7.8
-gripper_current_release_a: 6.2
+gripper_current_soft_limit_a: 5.8  # 2026-08-29 夕: ファーム堵転保護(実測4.8-5.2Aで発火)より下でソフト側が先に手を打つ
+gripper_current_hard_limit_a: 6.5
+gripper_current_release_a: 5.0
 gripper_current_trip_confirm_count: 3
 
 gripper_status_guard_enabled: true
 gripper_status_stale_s: 0.25
-# 通常の 3.0 N.m 飽和を誤検出しないよう hard threshold に小さな余裕を持たせます。
-# motor-side limit_torque=3.0 N.m が実際の絶対上限です。
-gripper_torque_soft_limit_nm: 3.2
-gripper_torque_hard_limit_nm: 3.6
-gripper_torque_release_nm: 2.90
+# 保持ピーク 3.4 N·m の通常飽和を誤検出しないよう余裕を持たせます。
+# motor-side limit_torque=3.5 N·m が実際の絶対上限です。
+gripper_torque_soft_limit_nm: 3.6  # 2026-08-29 夕: 保持ピーク3.4に追従
+gripper_torque_hard_limit_nm: 4.0
+gripper_torque_release_nm: 3.10    # ランプ上限ゲートを兼ねる: 実効ピーク≈release+追従遅れ
 gripper_torque_trip_confirm_count: 3
 
-# 物体に触れた後だけ 2.2 N.m から 3.0 N.m へ保持力を上げます。
+# 物体に触れた後だけ 2.6 N.m から 3.8 N.m へ保持力を上げます。
 # 物体に触れる前の自由閉じ速度にはレート制限を掛けません。
 gripper_contact_torque_nm: 1.50  # 2026-08-29: 1.0→1.5 軽接触で即ホールドに入らないよう緩和
 gripper_contact_initial_torque_nm: 2.60
-gripper_torque_ramp_nm_s: 3.00
-gripper_torque_backoff_nm_s: 2.50
+gripper_torque_ramp_nm_s: 5.00   # 2026-08-29 夕: 8→5 立ち上がりを少し緩めて突入を抑制
+gripper_torque_backoff_nm_s: 5.00  # 2026-08-29: 2.5→5.0 ソフトリミット時の戻しも速く
+
+# 堵転保護リリーフ (2026-08-29 追加):
+# 電流が 4.2 A を超えて 0.7 秒続いたら、保持トルクを 0.3 秒だけ 1.8 N·m へ
+# 落として firmware のストールタイマーをリセットする。ディップ中も指は
+# 接触点に留まり (lock_target は維持)、圧力だけが一瞬下がる。
+gripper_stall_relief_enabled: true
+gripper_stall_relief_current_a: 4.2
+gripper_stall_relief_torque_nm: 2.4   # 電流が読めない時のトルク代替判定
+gripper_stall_relief_high_s: 0.7
+gripper_stall_relief_rest_s: 0.3
+gripper_stall_relief_rest_torque_nm: 1.8
+
+# 温度リリーフ (2026-08-29 追加): 保持中 ~6°C/s で昇温する実測あり。
+# 70°C で保持を 1.8 N·m に落とし、60°C まで冷えたら復帰。
+gripper_temp_soft_limit_c: 70.0
+gripper_temp_release_c: 60.0
 
 # Type-2 torque または iqf が古い/欠落した時は、フル 3.0 N.m へ上げません。
 gripper_require_status_for_full_torque: true
@@ -129,11 +151,13 @@ gripper_guard_feedback_timeout_s: 0.08
 gripper_guard_feedback_stale_s: 0.5
 gripper_guard_require_feedback: true
 
-# デフォルトではグリッパの通常ゲイン/自由閉じ応答は他軸と同じです。
-gripper_soft_gains_enabled: false
-gripper_kp: null
-gripper_kd: null
-gripper_t_ff: null
+# 2026-08-29 夜: かさ持ち上げ時、把持物の荷重による指のバックドライブで
+# kd×速度項が MIT 飽和 (±5.5N·m/10A) まで暴れる実測。グリッパのみ kd を
+# 下げて減衰トルクを抑える (kp=20 の剛性は据え置き。自由閉じはむしろ軽くなる)。
+gripper_soft_gains_enabled: true
+gripper_kp: 20.0
+gripper_kd: 0.4
+gripper_t_ff: 0.0
 
 # 角度ストールによる接触検出（Type-2 status がない場合のフォールバックも兼ねます）。
 gripper_guard_stall_error_rad: 0.08
@@ -141,11 +165,11 @@ gripper_guard_stall_motion_rad: 0.004
 gripper_guard_stall_confirm_count: 2
 
 # 接触後の位置誤差は、要求保持トルク / Kp から計算します。
-# Kp=20, 3.0 N.m なら 0.15 rad で、ここを絶対上限にします。
+# Kp=20, 3.8 N.m なら 0.19 rad で、ここを絶対上限にします。
 gripper_guard_hold_position_error_rad: 0.05
 gripper_guard_backoff_rad: 0.01
 gripper_guard_pressure_scale: 3.0
-gripper_guard_max_hold_error_rad: 0.15
+gripper_guard_max_hold_error_rad: 0.18  # 2026-08-29 夕: 保持ピーク3.4N·m(Kp=20→0.17rad)に追従
 gripper_guard_release_rad: 0.05  # 2026-08-29: 0.12→0.05 少し開けばすぐ解除 (手が死ぬ感覚の対策)
 gripper_guard_log_interval_s: 1.0
 
